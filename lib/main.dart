@@ -12,7 +12,7 @@ class ScanMotorApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Scan Motor Honda',
+        title: 'DIKJAYA Scanner',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorSchemeSeed: Colors.red,
@@ -35,8 +35,11 @@ class _ConnectPageState extends State<ConnectPage> {
   final _bt = FlutterBlueClassic();
   List<BluetoothDevice> _devices = [];
   String _protocol = '0';
+  String _brand = 'Honda';
   String _status = '';
   bool _busy = false;
+
+  static const _brands = ['Honda', 'Yamaha', 'Kawasaki', 'Lainnya'];
 
   static const _protocols = {
     '0': 'Otomatis',
@@ -79,7 +82,7 @@ class _ConnectPageState extends State<ConnectPage> {
       setState(() => _status = '');
       await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => DashPage(elm: elm, initInfo: info)),
+        MaterialPageRoute(builder: (_) => DashPage(elm: elm, initInfo: info, brand: _brand)),
       );
       elm.close();
     } catch (e) {
@@ -92,9 +95,21 @@ class _ConnectPageState extends State<ConnectPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan Motor Honda')),
+      appBar: AppBar(title: const Text('DIKJAYA Scanner')),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: DropdownButtonFormField<String>(
+              value: _brand,
+              decoration: const InputDecoration(
+                  labelText: 'Merek motor', border: OutlineInputBorder()),
+              items: _brands
+                  .map((b) => DropdownMenuItem(value: b, child: Text(b)))
+                  .toList(),
+              onChanged: (v) => setState(() => _brand = v ?? 'Honda'),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: DropdownButtonFormField<String>(
@@ -145,9 +160,14 @@ class _ConnectPageState extends State<ConnectPage> {
 // -------------------------------------------------------------- Dashboard
 
 class DashPage extends StatefulWidget {
-  const DashPage({super.key, required this.elm, required this.initInfo});
+  const DashPage(
+      {super.key,
+      required this.elm,
+      required this.initInfo,
+      required this.brand});
   final Elm327 elm;
   final String initInfo;
+  final String brand;
   @override
   State<DashPage> createState() => _DashPageState();
 }
@@ -158,7 +178,7 @@ class _DashPageState extends State<DashPage> {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      DtcTab(elm: widget.elm),
+      DtcTab(elm: widget.elm, brand: widget.brand),
       LiveTab(elm: widget.elm),
       TerminalTab(elm: widget.elm, initInfo: widget.initInfo),
     ];
@@ -183,8 +203,9 @@ class _DashPageState extends State<DashPage> {
 // -------------------------------------------------------------- Kode error
 
 class DtcTab extends StatefulWidget {
-  const DtcTab({super.key, required this.elm});
+  const DtcTab({super.key, required this.elm, required this.brand});
   final Elm327 elm;
+  final String brand;
   @override
   State<DtcTab> createState() => _DtcTabState();
 }
@@ -277,17 +298,19 @@ class _DtcTabState extends State<DtcTab> {
           Text('Balasan mentah:\n$_raw',
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
         ],
-        const Divider(height: 32),
-        const Text('Kamus kode kedip PGM-FI Honda',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        const Text('Verifikasi dengan manual servis tipe motor Anda.',
-            style: TextStyle(fontSize: 12)),
-        for (final e in DtcDb.hondaBlink.entries)
-          ListTile(
-            dense: true,
-            leading: CircleAvatar(radius: 14, child: Text(e.key)),
-            title: Text(e.value),
-          ),
+        if (DtcDb.forBrand(widget.brand).isNotEmpty) ...[
+          const Divider(height: 32),
+          Text('Kamus kode gangguan ${widget.brand}',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Verifikasi dengan manual servis tipe motor Anda.',
+              style: TextStyle(fontSize: 12)),
+          for (final e in DtcDb.forBrand(widget.brand).entries)
+            ListTile(
+              dense: true,
+              leading: CircleAvatar(radius: 14, child: Text(e.key)),
+              title: Text(e.value),
+            ),
+        ],
       ],
     );
   }

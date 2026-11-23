@@ -26,7 +26,7 @@ jobs:
           mkdir -p /tmp/bak
           cp -r lib /tmp/bak/lib
           cp pubspec.yaml /tmp/bak/pubspec.yaml
-          flutter create --platforms=android --project-name scan_motor_honda .
+          flutter create --platforms=android --project-name dikjaya_scanner .
           rm -rf lib test
           cp -r /tmp/bak/lib lib
           cp /tmp/bak/pubspec.yaml pubspec.yaml
@@ -44,6 +44,7 @@ jobs:
               <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>'''
           s = re.sub(r'(<manifest[^>]*>)', lambda m: m.group(1) + perms, s, count=1)
+          s = re.sub(r'android:label="[^"]*"', 'android:label="DIKJAYA Scanner"', s, count=1)
           open(p, 'w', encoding='utf-8').write(s)
           PY
 
@@ -53,5 +54,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: scan-motor-honda-apk
+          name: dikjaya-scanner-apk
           path: build/app/outputs/flutter-apk/app-release.apk

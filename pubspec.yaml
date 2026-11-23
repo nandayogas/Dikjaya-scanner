@@ -1,5 +1,5 @@
-name: scan_motor_honda
-description: Scanner diagnostik motor Honda (PGM-FI) via ELM327 Bluetooth.
+name: dikjaya_scanner
+description: DIKJAYA Scanner - diagnostik motor Honda, Yamaha, Kawasaki via ELM327 Bluetooth.
 publish_to: 'none'
 version: 0.1.0+1
 
