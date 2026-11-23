@@ -35,7 +35,11 @@ class ConnectPage extends StatefulWidget {
 
 class _ConnectPageState extends State<ConnectPage> {
   final _bt = FlutterBlueClassic();
-  List<BluetoothDevice> _devices = [];
+  final Map<String, BluetoothDevice> _bonded = {};
+  final Map<String, BluetoothDevice> _found = {};
+  StreamSubscription<dynamic>? _scanSub;
+  Timer? _scanTimer;
+  bool _scanning = false;
   String _protocol = '0';
   String _brand = 'Honda';
   String _status = '';
@@ -50,11 +54,25 @@ class _ConnectPageState extends State<ConnectPage> {
     '5': 'ISO 14230-4 (fast init)',
   };
 
+  /// Nama yang umum dipakai adaptor ELM327 Bluetooth.
+  static const _elmHints = ['obd', 'elm', 'vlink', 'v-link', 'vgate', 'icar'];
+
+  static bool _likelyElm(String? name) {
+    final n = (name ?? '').toLowerCase();
+    return _elmHints.any(n.contains);
+  }
+
   @override
   void initState() {
     super.initState();
     _load();
     _checkUpdate();
+  }
+
+  @override
+  void dispose() {
+    _stopScan(update: false);
+    super.dispose();
   }
 
   Future<void> _checkUpdate({bool manual = false}) async {
@@ -105,18 +123,81 @@ class _ConnectPageState extends State<ConnectPage> {
       Permission.bluetoothScan,
       Permission.locationWhenInUse,
     ].request();
+    await _loadBonded();
+    _startScan();
+  }
+
+  Future<void> _loadBonded() async {
     try {
       final list = await _bt.bondedDevices;
-      if (mounted) setState(() => _devices = list ?? []);
+      if (!mounted) return;
+      setState(() {
+        _bonded
+          ..clear()
+          ..addEntries((list ?? []).map((d) => MapEntry(d.address, d)));
+      });
     } catch (e) {
       if (mounted) setState(() => _status = 'Gagal membaca perangkat: $e');
     }
   }
 
+  void _startScan() {
+    if (_scanning) return;
+    try {
+      _scanSub?.cancel();
+      _scanSub = _bt.scanResults.listen((d) {
+        if (!mounted) return;
+        setState(() => _found[d.address] = d);
+      });
+      _bt.startScan();
+      setState(() => _scanning = true);
+      _scanTimer?.cancel();
+      _scanTimer = Timer(const Duration(seconds: 15), _stopScan);
+    } catch (e) {
+      setState(() {
+        _scanning = false;
+        _status = 'Gagal mencari perangkat: $e';
+      });
+    }
+  }
+
+  void _stopScan({bool update = true}) {
+    _scanTimer?.cancel();
+    _scanSub?.cancel();
+    _scanSub = null;
+    try {
+      _bt.stopScan();
+    } catch (_) {}
+    if (update && mounted && _scanning) setState(() => _scanning = false);
+  }
+
+  /// Gabungan perangkat terpasang dan hasil pencarian, ELM327 di atas.
+  List<BluetoothDevice> get _devices {
+    final all = <String, BluetoothDevice>{..._found, ..._bonded};
+    final list = all.values.toList();
+    list.sort((a, b) {
+      final la = _likelyElm(a.name) ? 0 : 1;
+      final lb = _likelyElm(b.name) ? 0 : 1;
+      if (la != lb) return la.compareTo(lb);
+      final ba = _bonded.containsKey(a.address) ? 0 : 1;
+      final bb = _bonded.containsKey(b.address) ? 0 : 1;
+      if (ba != bb) return ba.compareTo(bb);
+      return (a.name ?? '').compareTo(b.name ?? '');
+    });
+    return list;
+  }
+
+  List<BluetoothDevice> get _candidates =>
+      _devices.where((d) => _likelyElm(d.name)).toList();
+
   Future<void> _connect(BluetoothDevice d) async {
+    _stopScan();
     setState(() {
       _busy = true;
-      _status = 'Menyambung ke ${d.name ?? d.address}...';
+      _status = _bonded.containsKey(d.address)
+          ? 'Menyambung ke ${d.name ?? d.address}...'
+          : 'Memasangkan dan menyambung ke ${d.name ?? d.address}... '
+              'Masukkan PIN (1234 atau 0000) bila diminta.';
     });
     try {
       final conn = await _bt.connect(d.address);
@@ -127,18 +208,23 @@ class _ConnectPageState extends State<ConnectPage> {
       setState(() => _status = '');
       await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => DashPage(elm: elm, initInfo: info, brand: _brand)),
+        MaterialPageRoute(
+            builder: (_) =>
+                DashPage(elm: elm, initInfo: info, brand: _brand)),
       );
       elm.close();
     } catch (e) {
       if (mounted) setState(() => _status = 'Gagal: $e');
     } finally {
+      await _loadBonded();
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final devices = _devices;
+    final candidates = _candidates;
     return Scaffold(
       appBar: AppBar(
         title: const Text('DIKJAYA Scanner'),
@@ -180,30 +266,78 @@ class _ConnectPageState extends State<ConnectPage> {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Pasangkan ELM327 lewat pengaturan Bluetooth HP (PIN 1234 atau '
-              '0000), lalu pilih di bawah. Nyalakan kunci kontak motor.',
+              'Colokkan ELM327 ke motor dan nyalakan kunci kontak, lalu cari '
+              'perangkat. Ketuk perangkat untuk menyambung. Jika belum '
+              'dipasangkan, Android akan meminta PIN (1234 atau 0000).',
             ),
           ),
-          if (_busy) const LinearProgressIndicator(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: _busy
+                      ? null
+                      : (_scanning ? _stopScan : _startScan),
+                  icon: Icon(_scanning ? Icons.stop : Icons.bluetooth_searching),
+                  label: Text(_scanning ? 'Berhenti mencari' : 'Cari perangkat'),
+                ),
+              ),
+              if (candidates.length == 1) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _connect(candidates.first),
+                    icon: const Icon(Icons.flash_on),
+                    label: const Text('Sambung otomatis'),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+          if (_busy || _scanning) const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator()),
           if (_status.isNotEmpty)
             Padding(padding: const EdgeInsets.all(16), child: Text(_status)),
           Expanded(
-            child: ListView(
-              children: [
-                for (final d in _devices)
-                  ListTile(
-                    leading: const Icon(Icons.bluetooth),
-                    title: Text(d.name ?? 'Tanpa nama'),
-                    subtitle: Text(d.address),
-                    onTap: _busy ? null : () => _connect(d),
+            child: devices.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'Belum ada perangkat. Pastikan Bluetooth HP menyala '
+                        'dan ELM327 sudah dicolok, lalu ketuk Cari perangkat.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView(
+                    children: [
+                      for (final d in devices)
+                        ListTile(
+                          leading: Icon(_bonded.containsKey(d.address)
+                              ? Icons.bluetooth_connected
+                              : Icons.bluetooth),
+                          title: Text(d.name ?? 'Tanpa nama'),
+                          subtitle: Text(
+                              '${d.address} · ${_bonded.containsKey(d.address) ? 'sudah dipasangkan' : 'belum dipasangkan'}'),
+                          trailing: _likelyElm(d.name)
+                              ? const Chip(label: Text('ELM327?'))
+                              : null,
+                          onTap: _busy ? null : () => _connect(d),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           ),
           TextButton.icon(
-            onPressed: _load,
+            onPressed: _busy
+                ? null
+                : () async {
+                    await _loadBonded();
+                  },
             icon: const Icon(Icons.refresh),
-            label: const Text('Muat ulang perangkat'),
+            label: const Text('Muat ulang perangkat terpasang'),
           ),
         ],
       ),
