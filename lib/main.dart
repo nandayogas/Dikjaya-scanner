@@ -2,8 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dtc_db.dart';
 import 'elm327.dart';
+import 'updater.dart';
 
 void main() => runApp(const ScanMotorApp());
 
@@ -52,6 +54,49 @@ class _ConnectPageState extends State<ConnectPage> {
   void initState() {
     super.initState();
     _load();
+    _checkUpdate();
+  }
+
+  Future<void> _checkUpdate({bool manual = false}) async {
+    try {
+      final u = await Updater.check();
+      if (!mounted) return;
+      if (u == null) {
+        if (manual) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Aplikasi sudah versi terbaru.')));
+        }
+        return;
+      }
+      await showDialog(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('Pembaruan tersedia (${u.version})'),
+          content: Text(u.notes.isEmpty
+              ? 'Versi baru DIKJAYA Scanner sudah tersedia.'
+              : u.notes),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Nanti')),
+            FilledButton(
+              onPressed: () {
+                final url = u.apkUrl.isNotEmpty ? u.apkUrl : u.pageUrl;
+                launchUrl(Uri.parse(url),
+                    mode: LaunchMode.externalApplication);
+                Navigator.pop(c);
+              },
+              child: const Text('Unduh'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Gagal cek pembaruan: $e')));
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -95,7 +140,16 @@ class _ConnectPageState extends State<ConnectPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('DIKJAYA Scanner')),
+      appBar: AppBar(
+        title: const Text('DIKJAYA Scanner'),
+        actions: [
+          IconButton(
+            tooltip: 'Cek pembaruan',
+            icon: const Icon(Icons.system_update),
+            onPressed: () => _checkUpdate(manual: true),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
